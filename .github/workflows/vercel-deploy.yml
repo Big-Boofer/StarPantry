@@ -22,6 +22,17 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: CI diagnostics
+        run: |
+          echo "--- CI diagnostics ---"
+          node -v || true
+          npm -v || true
+          echo "Checking GitHub secrets presence (will not reveal values):"
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then echo "VERCEL_TOKEN: MISSING"; else echo "VERCEL_TOKEN: PRESENT"; fi
+          if [ -z "${{ secrets.VERCEL_ORG_ID }}" ]; then echo "VERCEL_ORG_ID: MISSING"; else echo "VERCEL_ORG_ID: PRESENT"; fi
+          if [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ]; then echo "VERCEL_PROJECT_ID: MISSING"; else echo "VERCEL_PROJECT_ID: PRESENT"; fi
+          echo "--- end diagnostics ---"
+
       - name: Deploy to Vercel (action)
         uses: amondnet/vercel-action@v20
         with:
