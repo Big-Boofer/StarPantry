@@ -55,3 +55,42 @@ git push -u origin main
 5) After the Action completes, your project will be deployed to Vercel. Visit the Vercel dashboard to find the URL, then set the `Recipe Imports URL` in Settings to `https://<your-app>.vercel.app/api/proxy`.
 
 Security note: Add an allowlist in `api/proxy.js` before making the proxy public if you plan heavy use; I can add a simple allowlist and caching layer for you.
+
+Recommended environment variables (Vercel)
+-----------------------------------------
+
+Set the following Environment Variables in your Vercel Project (Project → Settings → Environment Variables) for Production:
+
+- `VERCEL_TOKEN` — deployment token for GitHub Actions (already covered above).
+- `VITE_REMOTE_PROXY_URL` — the URL your frontend will call for recipe imports, e.g. `https://my-pantrypal.vercel.app/api/proxy`.
+- `PROXY_SECRET` — a strong random value; if set, the proxy requires `x-proxy-secret` header matching this value.
+- `PROXY_ALLOWLIST` — optional comma-separated hostnames allowed through the proxy, e.g. `example.com,*.recipes.example.org`. Leave empty to allow all hosts (not recommended for public usage).
+- `PROXY_CACHE_TTL` — optional cache time-to-live in seconds (default `300`).
+- `PROXY_RATE_LIMIT` — optional requests per window (default `60`).
+- `PROXY_RATE_WINDOW` — optional window size in seconds for rate limiting (default `60`).
+- `PROXY_CORS_ALLOW` — optional CORS origin value (defaults to `*`). For tighter security set to your site URL, e.g. `https://my-pantrypal.vercel.app`.
+
+Example values (Vercel UI):
+- Key: `PROXY_SECRET`, Value: `s3cr3t-r4nd0m-token` (Environment: Production)
+- Key: `VITE_REMOTE_PROXY_URL`, Value: `https://my-pantrypal.vercel.app/api/proxy`
+
+How the app picks the proxy
+---------------------------
+The frontend reads `VITE_REMOTE_PROXY_URL` at build time and uses it as the default remote proxy URL. If you set this env var in Vercel and redeploy, users won't need to enter the proxy URL in Settings manually.
+
+Testing the deployed proxy
+--------------------------
+If you set `PROXY_SECRET`, include it in requests as the `x-proxy-secret` header. Example `curl` (replace values):
+
+```bash
+curl -H "x-proxy-secret: s3cr3t-r4nd0m-token" \
+   "https://my-pantrypal.vercel.app/api/proxy?url=https://example.com/recipe-page"
+```
+
+If the proxy is allowlisted, ensure the target host is included in `PROXY_ALLOWLIST` or the request will be rejected with `403 Host not allowed`.
+
+Re-deploy after changes
+------------------------
+After adding or changing Environment Variables in the Vercel dashboard, trigger a redeploy (either via GitHub Actions or the Vercel dashboard) so the build sees `VITE_REMOTE_PROXY_URL` and other runtime variables take effect.
+
+I already added basic hardening (secret/allowlist/cache/rate-limit) to `api/proxy.js` and `server/proxy.js`. If you want stricter rules (better IP resolution, persistent caching, Redis, or logging), I can add them next.
