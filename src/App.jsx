@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 const initialIngredients = [
   { id: 1, name: "Tomatoes", quantity: 6, unit: "pcs", note: "Fresh", expiryDate: "2026-06-10" },
@@ -910,6 +911,7 @@ export default function App() {
           <Settings settings={settings} setSettings={setSettings} t={(k)=>getTranslation(settings.language,k)} />
         )}
       </div>
+      <Analytics />
     </div>
   );
 }
