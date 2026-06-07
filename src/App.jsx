@@ -179,7 +179,7 @@ function saveState(state) {
 const defaultSettings = {
   units: "metric", // or 'imperial'
   language: "en", // 'en' or 'es'
-  useLocalProxy: true,
+  contrast: "normal", // or 'high'
   // Allow build-time default via Vite env var `VITE_REMOTE_PROXY_URL`.
   // For deployed apps, set VITE_REMOTE_PROXY_URL in Vercel Environment Variables
   // to `https://<your-deployment>.vercel.app/api/proxy` (or your proxy URL).
@@ -223,6 +223,11 @@ const translations = {
     expiryDateLabel: "Expiry date",
     notesLabel: "Notes",
     preferencesTitle: "Preferences",
+    contrastLabel: "Contrast",
+    todayButton: "Today",
+    createOrder: "Create Order",
+    orderThis: "Order this recipe",
+    specialInstructionsPlaceholder: "Special instructions (optional)",
     unitsLabel: "Units",
     languageLabel: "Language",
     useLocalProxyLabel: "Use local proxy (when available)",
@@ -272,6 +277,11 @@ const translations = {
     expiryDateLabel: "Fecha de caducidad",
     notesLabel: "Notas",
     preferencesTitle: "Preferencias",
+    contrastLabel: "Contraste",
+    todayButton: "Hoy",
+    createOrder: "Crear pedido",
+    orderThis: "Pedir esta receta",
+    specialInstructionsPlaceholder: "Instrucciones especiales (opcional)",
     unitsLabel: "Unidades",
     languageLabel: "Idioma",
     useLocalProxyLabel: "Usar proxy local (si está disponible)",
@@ -321,6 +331,11 @@ const translations = {
     expiryDateLabel: "Date de péremption",
     notesLabel: "Notes",
     preferencesTitle: "Préférences",
+    contrastLabel: "Contraste",
+    todayButton: "Aujourd'hui",
+    createOrder: "Créer la commande",
+    orderThis: "Commander cette recette",
+    specialInstructionsPlaceholder: "Instructions spéciales (optionnel)",
     unitsLabel: "Unités",
     languageLabel: "Langue",
     useLocalProxyLabel: "Utiliser le proxy local (si disponible)",
@@ -370,6 +385,11 @@ const translations = {
     expiryDateLabel: "Ablaufdatum",
     notesLabel: "Notizen",
     preferencesTitle: "Einstellungen",
+    contrastLabel: "Kontrast",
+    todayButton: "Heute",
+    createOrder: "Bestellung erstellen",
+    orderThis: "Dieses Rezept bestellen",
+    specialInstructionsPlaceholder: "Besondere Anweisungen (optional)",
     unitsLabel: "Einheiten",
     languageLabel: "Sprache",
     useLocalProxyLabel: "Lokalen Proxy verwenden (falls verfügbar)",
@@ -419,6 +439,11 @@ const translations = {
     expiryDateLabel: "Data de validade",
     notesLabel: "Notas",
     preferencesTitle: "Preferências",
+    contrastLabel: "Contraste",
+    todayButton: "Hoje",
+    createOrder: "Criar Pedido",
+    orderThis: "Pedir esta receita",
+    specialInstructionsPlaceholder: "Instruções especiais (opcional)",
     unitsLabel: "Unidades",
     languageLabel: "Idioma",
     useLocalProxyLabel: "Usar proxy local (quando disponível)",
@@ -798,6 +823,7 @@ export default function App() {
   const [orders, setOrders] = useState(savedState.orders ?? initialOrders);
 
   const [settings, setSettings] = useState(savedState.settings ?? defaultSettings);
+  const [orderDraft, setOrderDraft] = useState(savedState.orderDraft ?? null);
 
   const prevUnitsRef = useRef(settings.units);
   useEffect(() => {
@@ -808,8 +834,8 @@ export default function App() {
   }, [settings.units]);
 
   useEffect(() => {
-    saveState({ activePage, selectedRecipeId, ingredients, recipes, orders, settings });
-  }, [activePage, selectedRecipeId, ingredients, recipes, orders, settings]);
+    saveState({ activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft });
+  }, [activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft]);
 
   const lowStockCount = useMemo(
     () => ingredients.filter((item) => item.quantity <= 2).length,
@@ -853,7 +879,7 @@ export default function App() {
   const t = (k, ...args) => getTranslation(settings.language, k, ...args);
 
   return (
-    <div style={styles.app}>
+    <div style={settings.contrast === 'high' ? { ...styles.app, background: '#ffffff', color: '#000' } : styles.app}>
       <div style={styles.sidebar}>
         <div style={styles.logo}>🌿 {t('appName')}</div>
 
@@ -897,14 +923,39 @@ export default function App() {
         )}
 
         {activePage === "recipes" && (
-          <Recipes recipes={recipes} setRecipes={setRecipes} onOpenRecipe={openRecipe} settings={settings} t={(k)=>getTranslation(settings.language,k)} />
+          <Recipes
+            recipes={recipes}
+            setRecipes={setRecipes}
+            onOpenRecipe={openRecipe}
+            settings={settings}
+            t={(k)=>getTranslation(settings.language,k)}
+            setOrderDraft={setOrderDraft}
+            setActivePage={setActivePage}
+          />
         )}
 
         {activePage === "recipe" && selectedRecipe && (
-          <RecipeDetail recipe={selectedRecipe} onBack={closeRecipe} settings={settings} t={(k)=>getTranslation(settings.language,k)} />
+          <RecipeDetail
+            recipe={selectedRecipe}
+            onBack={closeRecipe}
+            settings={settings}
+            t={(k)=>getTranslation(settings.language,k)}
+            setOrderDraft={setOrderDraft}
+            setActivePage={setActivePage}
+          />
         )}
 
-        {activePage === "orders" && <Orders orders={orders} setOrders={setOrders} settings={settings} t={(k)=>getTranslation(settings.language,k)} />}
+        {activePage === "orders" && (
+          <Orders
+            orders={orders}
+            setOrders={setOrders}
+            settings={settings}
+            t={(k)=>getTranslation(settings.language,k)}
+            recipes={recipes}
+            orderDraft={orderDraft}
+            setOrderDraft={setOrderDraft}
+          />
+        )}
 
         {activePage === "settings" && (
           <Settings settings={settings} setSettings={setSettings} t={(k)=>getTranslation(settings.language,k)} />
@@ -1095,7 +1146,7 @@ function Pantry({ ingredients, setIngredients, settings, t }) {
   );
 }
 
-function Recipes({ recipes, setRecipes, onOpenRecipe, settings, t }) {
+function Recipes({ recipes, setRecipes, onOpenRecipe, settings, t, setOrderDraft, setActivePage }) {
   const [recipeUrl, setRecipeUrl] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [isImporting, setIsImporting] = useState(false);
@@ -1169,10 +1220,21 @@ function Recipes({ recipes, setRecipes, onOpenRecipe, settings, t }) {
         ) : (
           <div style={styles.recipeGrid}>
             {recipes.map((recipe) => (
-              <div key={recipe.id} style={styles.recipeCardClickable} onClick={() => onOpenRecipe(recipe.id)}>
+              <div key={recipe.id} style={styles.recipeCardClickable}>
                 <div style={styles.recipeHeader}>
-                  <strong>{recipe.title}</strong>
-                  <span style={styles.recipeSource}>{recipe.source}</span>
+                  <div style={{ cursor: 'pointer' }} onClick={() => onOpenRecipe(recipe.id)}>
+                    <strong>{recipe.title}</strong>
+                    <div style={styles.recipeSource}>{recipe.source}</div>
+                  </div>
+                  <div>
+                    <button
+                      style={styles.primaryButton}
+                      onClick={() => {
+                        setOrderDraft({ recipe: recipe.title, servings: 1, instructions: '' });
+                        setActivePage('orders');
+                      }}
+                    >Order</button>
+                  </div>
                 </div>
                 <ul style={styles.recipeList}>
                   {recipe.ingredients.map((line, index) => (
@@ -1188,7 +1250,12 @@ function Recipes({ recipes, setRecipes, onOpenRecipe, settings, t }) {
   );
 }
 
-function RecipeDetail({ recipe, onBack, settings, t }) {
+function RecipeDetail({ recipe, onBack, settings, t, setOrderDraft, setActivePage }) {
+  const orderThis = () => {
+    setOrderDraft({ recipe: recipe.title, servings: 1, instructions: "" });
+    setActivePage('orders');
+  };
+
   return (
     <div>
       <button style={styles.backButton} onClick={onBack}>{t('backToRecipes')}</button>
@@ -1197,6 +1264,9 @@ function RecipeDetail({ recipe, onBack, settings, t }) {
           <h1 style={{ marginBottom: 8 }}>{recipe.title}</h1>
           <p style={styles.subtitle}>Imported from: {recipe.source}</p>
           {recipe.description && <p style={styles.recipeDescription}>{recipe.description}</p>}
+        </div>
+        <div>
+          <button style={styles.primaryButton} onClick={orderThis}>{t('orderThis')}</button>
         </div>
       </div>
 
@@ -1227,11 +1297,21 @@ function RecipeDetail({ recipe, onBack, settings, t }) {
   );
 }
 
-function Orders({ orders, setOrders, settings, t }) {
+function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = null, setOrderDraft }) {
   const [filter, setFilter] = useState("active");
   const [customer, setCustomer] = useState("");
   const [recipeName, setRecipeName] = useState("");
   const [due, setDue] = useState("");
+  const [servings, setServings] = useState(1);
+  const [instructions, setInstructions] = useState("");
+
+  useEffect(() => {
+    if (orderDraft) {
+      setRecipeName(orderDraft.recipe || "");
+      setServings(orderDraft.servings || 1);
+      setInstructions(orderDraft.instructions || "");
+    }
+  }, [orderDraft]);
 
   const filterLabels = t('orderFilters');
   const filterOptions = [
@@ -1253,10 +1333,13 @@ function Orders({ orders, setOrders, settings, t }) {
       customer: customer.trim(),
       recipe: recipeName.trim(),
       due: due || "ASAP",
+      servings: servings || 1,
+      instructions: instructions || "",
       status: "Pending"
     };
     setOrders((cur) => [next, ...cur]);
-    setCustomer(""); setRecipeName(""); setDue("");
+    setCustomer(""); setRecipeName(""); setDue(""); setServings(1); setInstructions("");
+    if (setOrderDraft) setOrderDraft(null);
   };
 
   const advanceOrder = (id) => {
@@ -1283,11 +1366,27 @@ function Orders({ orders, setOrders, settings, t }) {
         <div style={styles.sectionHeader}>
           <h3 style={{ margin: 0 }}>{t('preferencesTitle')}</h3>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 220px', gap: 12, alignItems: 'center' }}>
           <input placeholder="Customer name" value={customer} onChange={(e)=>setCustomer(e.target.value)} style={styles.input} />
-          <input placeholder="Recipe name" value={recipeName} onChange={(e)=>setRecipeName(e.target.value)} style={styles.input} />
-          <input placeholder="Due (e.g. 15:30)" value={due} onChange={(e)=>setDue(e.target.value)} style={{ ...styles.input, width: 160 }} />
-          <button style={styles.primaryButton} onClick={addOrder}>Create Order</button>
+
+          <select value={recipeName} onChange={(e)=>setRecipeName(e.target.value)} style={styles.input}>
+            <option value="">-- Select recipe or type name --</option>
+            {recipes.map(r => <option key={r.id} value={r.title}>{r.title}</option>)}
+          </select>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={servings} onChange={(e)=>setServings(Number(e.target.value))} style={{ ...styles.input, width: 110 }}>
+                {Array.from({length:20},(_,i)=>i+1).map(n=> <option key={n} value={n}>{n} serving{n>1?'s':''}</option>)}
+            </select>
+            <input type="date" value={due} onChange={(e)=>setDue(e.target.value)} style={{ ...styles.input, width: 180 }} />
+              <button style={styles.filterButton} onClick={()=> setDue(new Date().toISOString().slice(0,10)) }>{t('todayButton')}</button>
+          </div>
+
+          <textarea placeholder={t('specialInstructionsPlaceholder')} value={instructions} onChange={(e)=>setInstructions(e.target.value)} style={{ ...styles.input, gridColumn: '1 / -1', height: 80 }} />
+
+          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+            <button style={styles.primaryButton} onClick={addOrder}>{t('createOrder')}</button>
+          </div>
         </div>
       </div>
 
@@ -1316,7 +1415,8 @@ function Orders({ orders, setOrders, settings, t }) {
               <div key={order.id} style={styles.orderRow}>
                 <div>
                   <strong>{order.customer}</strong>
-                  <div style={styles.itemMeta}>{order.recipe}</div>
+                  <div style={styles.itemMeta}>{order.recipe} {order.servings ? `• ${order.servings} serving${order.servings>1?'s':''}` : ''}</div>
+                  {order.instructions ? <div style={{ color: '#666', marginTop: 6 }}>{order.instructions}</div> : null}
                 </div>
                 <div style={styles.orderInfo}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1404,22 +1504,15 @@ function Settings({ settings, setSettings, t }) {
         </label>
 
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <input
-            type="checkbox"
-            checked={!!settings.useLocalProxy}
-            onChange={(e) => update({ useLocalProxy: !!e.target.checked })}
-          />
-          <span style={{ marginLeft: 8 }}>{t('useLocalProxyLabel')}</span>
-        </label>
-
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          {t('recipeImports')} URL (optional):
-          <input
-            placeholder="https://your-proxy.example.com/api/proxy"
-            value={settings.remoteProxyUrl || ''}
-            onChange={(e) => update({ remoteProxyUrl: e.target.value })}
-            style={{ ...styles.input, marginTop: 8 }}
-          />
+          {t('contrastLabel')}:
+          <select
+            value={settings.contrast || 'normal'}
+            onChange={(e) => update({ contrast: e.target.value })}
+            style={{ marginLeft: 8 }}
+          >
+            <option value="normal">Normal</option>
+            <option value="high">High Contrast</option>
+          </select>
         </label>
 
         <div style={{ marginTop: 18 }}>
