@@ -180,7 +180,10 @@ const defaultSettings = {
   units: "metric", // or 'imperial'
   language: "en", // 'en' or 'es'
   useLocalProxy: true,
-  remoteProxyUrl: ""
+  // Allow build-time default via Vite env var `VITE_REMOTE_PROXY_URL`.
+  // For deployed apps, set VITE_REMOTE_PROXY_URL in Vercel Environment Variables
+  // to `https://<your-deployment>.vercel.app/api/proxy` (or your proxy URL).
+  remoteProxyUrl: import.meta.env.VITE_REMOTE_PROXY_URL || ""
 };
 
 const translations = {
