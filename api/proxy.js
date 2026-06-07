@@ -40,6 +40,18 @@ function isPrivateIpAddress(host) {
   return false;
 }
 
+async function resolvesToPrivateIp(hostname) {
+  try {
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return isPrivateIpAddress(hostname);
+    const dns = await import('dns').then(m => m.promises);
+    const res = await dns.lookup(hostname, { family: 4 });
+    return isPrivateIpAddress(res.address);
+  } catch (e) {
+    // if DNS fails, be conservative and allow (not block) so we don't 500 on lookup errors
+    return false;
+  }
+}
+
 export default async function handler(req, res) {
   try {
     // CORS / preflight
@@ -71,8 +83,8 @@ export default async function handler(req, res) {
 
     const parsed = new URL(url);
 
-    // Disallow private IPs / localhost
-    if (isPrivateIpAddress(parsed.hostname)) {
+    // Disallow private IPs / localhost (including DNS-resolved addresses)
+    if (isPrivateIpAddress(parsed.hostname) || await resolvesToPrivateIp(parsed.hostname)) {
       res.status(403).send('Forbidden');
       return;
     }
@@ -100,22 +112,49 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Simple in-memory cache
+    // Simple in-memory cache with max entries (LRU eviction)
     const cacheTtl = Number(process.env.PROXY_CACHE_TTL || 300) * 1000;
+    const cacheMax = Number(process.env.PROXY_CACHE_MAX || 200);
     const cached = cache.get(url);
     if (cached && (now < cached.expiresAt)) {
+      // refresh LRU position
+      cache.delete(url);
+      cache.set(url, cached);
       res.setHeader('Content-Type', cached.contentType || 'text/html; charset=utf-8');
       res.status(200).send(cached.body);
       return;
     }
 
     const fetchFn = global.fetch || (await import('node-fetch')).default;
-    const resp = await fetchFn(url, { redirect: 'follow' });
+    // Fetch with timeout
+    const timeoutMs = Number(process.env.PROXY_FETCH_TIMEOUT || 10000);
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    let resp;
+    try {
+      resp = await fetchFn(url, { redirect: 'follow', signal: controller.signal });
+    } catch (err) {
+      clearTimeout(id);
+      if (err.name === 'AbortError') {
+        res.status(504).send('Upstream timed out');
+        return;
+      }
+      throw err;
+    }
+    clearTimeout(id);
+
     const text = await resp.text();
     const contentType = resp.headers?.get?.('content-type') || 'text/html; charset=utf-8';
 
+    // store in cache, enforcing max entries (LRU)
     cache.set(url, { body: text, contentType, expiresAt: now + cacheTtl });
+    if (cache.size > cacheMax) {
+      // evict oldest
+      const firstKey = cache.keys().next().value;
+      if (firstKey) cache.delete(firstKey);
+    }
 
+    // Only expose safe headers
     res.setHeader('Content-Type', contentType);
     res.status(200).send(text);
   } catch (err) {

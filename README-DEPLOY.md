@@ -12,19 +12,33 @@ Recommended quick path (Vercel):
 4. In the app, open Settings and set the "Recipe Imports URL" to the serverless proxy endpoint from step 3 (for example `https://my-pantrypal.vercel.app/api/proxy`).
 5. Deploy and visit the generated URL — the importer will use the deployed proxy to fetch recipes and the site will be accessible from anywhere.
 
+Supabase (Auth + Persistence)
+---------------------------------
+This app can use Supabase for households, authentication, and persistent shared state.
+
+1. Create a Supabase project at https://app.supabase.com
+2. Open the SQL editor and run the SQL in `supabase_schema.sql` to create the `households` and `household_members` tables and RLS policies.
+3. In your Supabase project settings -> API, copy the `url` and the `anon` public key.
+4. In Vercel, add the following Environment Variables (Production):
+   - `VITE_SUPABASE_URL` — your Supabase `url` (e.g. `https://xyz.supabase.co`)
+   - `VITE_SUPABASE_ANON_KEY` — the `anon` public key
+5. Redeploy the app so the build picks up `VITE_SUPABASE_URL`.
+
+Notes:
+- The app stores a household `state` JSON blob in the `households` table (ingredients, recipes, orders, settings). You can expand the schema if you want normalized tables.
+- The provided SQL enables Row Level Security (RLS) so only owners or household members can read/write household rows. Review and adapt policies for your workflow.
+- For invites and membership management you can extend the `household_members` table and add server-side functions for invite emails.
+
 Notes:
 - The serverless proxy forwards the requested page HTML and sets CORS headers. It is intended for light use and demo purposes only. For production use, add caching, rate-limiting, and request validation.
 - If you prefer Netlify, place `api/proxy.js` under `netlify/functions/proxy.js` and follow Netlify Functions docs.
-- If you have a custom server (Heroku, DigitalOcean App Platform), you can run `server/proxy.js` directly (Node 18+ recommended) and point the app to that URL.
+If you have a custom server (Heroku, DigitalOcean App Platform), deploy the serverless `api/proxy.js` or host your own proxy on your server and point the app to that URL.
 
 Commands to test locally before deploying:
 
 ```bash
 # build the frontend
 npm run build
-
-# run the local proxy (if you want the same behavior as serverless)
-node server/proxy.js
 ```
 
 What I added for you
@@ -93,4 +107,4 @@ Re-deploy after changes
 ------------------------
 After adding or changing Environment Variables in the Vercel dashboard, trigger a redeploy (either via GitHub Actions or the Vercel dashboard) so the build sees `VITE_REMOTE_PROXY_URL` and other runtime variables take effect.
 
-I already added basic hardening (secret/allowlist/cache/rate-limit) to `api/proxy.js` and `server/proxy.js`. If you want stricter rules (better IP resolution, persistent caching, Redis, or logging), I can add them next.
+I already added basic hardening (secret/allowlist/cache/rate-limit) to `api/proxy.js`. If you want stricter rules (better IP resolution, persistent caching, Redis, or logging), I can add them next.

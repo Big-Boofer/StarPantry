@@ -1,4 +1,6 @@
 ﻿import { useEffect, useMemo, useState, useRef } from "react";
+import { supabase, signInWithGoogle, signOut, getUser, onAuthStateChange, listHouseholds, createHousehold, loadHouseholdState, saveHouseholdState, createInvitation, subscribeToHousehold } from "./supabaseClient";
+import HouseholdModal from "./HouseholdModal";
 import pkg from "../package.json";
 
 const APP_VERSION = pkg?.version || '0.0.0';
@@ -827,6 +829,14 @@ export default function App() {
 
   const [settings, setSettings] = useState(savedState.settings ?? defaultSettings);
   const [orderDraft, setOrderDraft] = useState(savedState.orderDraft ?? null);
+  const [toast, setToast] = useState(null);
+  const autosaveRef = useRef(null);
+  const [user, setUser] = useState(null);
+  const [households, setHouseholds] = useState([]);
+  const [currentHouseholdId, setCurrentHouseholdId] = useState(savedState.currentHouseholdId || null);
+  const saveTimer = useRef(null);
+  const [showHouseholdModal, setShowHouseholdModal] = useState(false);
+  const householdSubRef = useRef(null);
 
   const prevUnitsRef = useRef(settings.units);
   useEffect(() => {
@@ -839,6 +849,94 @@ export default function App() {
   useEffect(() => {
     saveState({ activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft });
   }, [activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft]);
+
+  // Autosave behavior
+  useEffect(() => {
+    if (autosaveRef.current) {
+      clearInterval(autosaveRef.current);
+      autosaveRef.current = null;
+    }
+    const val = settings?.autosaveInterval;
+    const secs = Number(val);
+    if (!isNaN(secs) && secs > 0) {
+      autosaveRef.current = setInterval(() => {
+        try { saveState({ activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft }); }
+        catch (e) {}
+      }, secs * 1000);
+    }
+    return () => {
+      if (autosaveRef.current) { clearInterval(autosaveRef.current); autosaveRef.current = null; }
+    };
+  }, [settings?.autosaveInterval, activePage, selectedRecipeId, ingredients, recipes, orders, settings, orderDraft]);
+
+  // Supabase auth integration
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const u = await getUser();
+        if (!mounted) return;
+        setUser(u);
+        if (u) {
+          const res = await listHouseholds(u.id);
+          if (res && !res.error) setHouseholds(res.data || []);
+        }
+      } catch (e) {
+        console.error('auth init', e);
+      }
+    })();
+
+    const sub = onAuthStateChange((event, u) => {
+      setUser(u);
+      if (u) {
+        listHouseholds(u.id).then(r => { if (!r.error) setHouseholds(r.data || []); });
+      } else {
+        setHouseholds([]);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      try { sub?.unsubscribe?.(); } catch {}
+    };
+  }, []);
+
+  // Persist household state to Supabase when signed in and household selected
+  useEffect(() => {
+    if (!user || !currentHouseholdId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const state = { ingredients, recipes, orders, settings, orderDraft };
+        await saveHouseholdState(currentHouseholdId, state);
+      } catch (e) { console.error('save household', e); }
+    }, 1200);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [user, currentHouseholdId, ingredients, recipes, orders, settings, orderDraft]);
+
+  // Subscribe to household realtime updates
+  useEffect(() => {
+    if (householdSubRef.current && householdSubRef.current.unsubscribe) {
+      try { householdSubRef.current.unsubscribe(); } catch {}
+      householdSubRef.current = null;
+    }
+    if (currentHouseholdId) {
+      householdSubRef.current = subscribeToHousehold(currentHouseholdId, async (payload) => {
+        if (!payload || !payload.record) return;
+        const s = payload.record.state;
+        if (s) {
+          if (s.ingredients) setIngredients(s.ingredients);
+          if (s.recipes) setRecipes(s.recipes);
+          if (s.orders) setOrders(s.orders);
+          if (s.settings) setSettings(s.settings);
+          if (s.orderDraft) setOrderDraft(s.orderDraft);
+        }
+      });
+    }
+    return () => {
+      try { householdSubRef.current?.unsubscribe?.(); } catch {}
+    };
+  }, [currentHouseholdId]);
 
   const lowStockCount = useMemo(
     () => ingredients.filter((item) => item.quantity <= 2).length,
@@ -883,6 +981,7 @@ export default function App() {
 
   // Build contrast-aware overrides
   const contrast = settings?.contrast || 'normal';
+  const theme = settings?.theme || 'auto';
   const appStyle = contrast === 'high'
     ? {
         ...styles.app,
@@ -900,13 +999,26 @@ export default function App() {
     listCard: { ...styles.listCard, background: '#fff', border: '2px solid #000' }
   } : {};
 
+  // Theme handling
+  let themeOverrides = {};
+  if (theme === 'dark' || (theme === 'auto' && typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    themeOverrides = {
+      app: { background: '#0b0b0b', color: '#fff', '--card-border': '#222', '--item-border': '#222' },
+      sidebar: { background: '#0a0a0a', color: '#fff' },
+      main: { background: '#111', color: '#fff' },
+      primaryButton: { background: '#1f8a4a', color: '#fff' },
+      listCard: { background: '#161616', border: '1px solid #222' },
+      itemRow: { background: 'transparent', border: '1px solid #222' }
+    };
+  }
+
   const appliedStyles = {
-    app: appStyle,
-    sidebar: highContrastOverrides.sidebar || styles.sidebar,
-    main: highContrastOverrides.main || styles.main,
-    primaryButton: highContrastOverrides.primaryButton || styles.primaryButton,
-    input: highContrastOverrides.input || styles.input,
-    listCard: highContrastOverrides.listCard || styles.listCard,
+    app: { ...appStyle, ...(themeOverrides.app || {}) },
+    sidebar: { ...(highContrastOverrides.sidebar || styles.sidebar), ...(themeOverrides.sidebar || {}) },
+    main: { ...(highContrastOverrides.main || styles.main), ...(themeOverrides.main || {}) },
+    primaryButton: { ...(highContrastOverrides.primaryButton || styles.primaryButton), ...(themeOverrides.primaryButton || {}) },
+    input: { ...(highContrastOverrides.input || styles.input) },
+    listCard: { ...(highContrastOverrides.listCard || styles.listCard) }
   };
 
   // Helper to read app version
@@ -939,6 +1051,30 @@ export default function App() {
       </div>
 
       <div style={appliedStyles.main}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+          {user ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ fontSize: 13 }}>{user.email || user?.user_metadata?.full_name || user?.name}</div>
+              <button style={styles.filterButton} onClick={async () => { await signOut(); setUser(null); setHouseholds([]); setCurrentHouseholdId(null); }}>{t('signOut') || 'Sign out'}</button>
+            </div>
+          ) : (
+            <div>
+              <button style={styles.primaryButton} onClick={() => signInWithGoogle()}>{t('signInWithGoogle') || 'Sign in with Google'}</button>
+            </div>
+          )}
+        </div>
+        <HouseholdModal visible={showHouseholdModal} onClose={() => setShowHouseholdModal(false)} onCreate={async (name) => {
+          setShowHouseholdModal(false);
+          if (!user) return;
+          const res = await createHousehold(name, user.id, { ingredients, recipes, orders, settings, orderDraft });
+          if (res && !res.error) {
+            setHouseholds((h) => (h || []).concat([res.data]));
+            setCurrentHouseholdId(res.data.id);
+            setToast({ message: 'Household created', timeout: 3000 });
+          } else {
+            setToast({ message: 'Create failed', timeout: 3000 });
+          }
+        }} />
         {activePage === "dashboard" && (
           <Dashboard
             ingredients={ingredients}
@@ -949,6 +1085,18 @@ export default function App() {
             expiringIngredients={expiringIngredients}
             settings={settings}
             t={(k, ...args) => getTranslation(settings.language, k, ...args)}
+            toast={toast}
+            setToast={setToast}
+            setActivePage={setActivePage}
+            user={user}
+            households={households}
+            currentHouseholdId={currentHouseholdId}
+            setCurrentHouseholdId={setCurrentHouseholdId}
+            setIngredients={setIngredients}
+            setRecipes={setRecipes}
+            setOrders={setOrders}
+            setSettings={setSettings}
+            setOrderDraft={setOrderDraft}
           />
         )}
 
@@ -988,6 +1136,7 @@ export default function App() {
             recipes={recipes}
             orderDraft={orderDraft}
             setOrderDraft={setOrderDraft}
+            setToast={setToast}
           />
         )}
 
@@ -999,12 +1148,74 @@ export default function App() {
   );
 }
 
-function Dashboard({ ingredients, recipes, orders, lowStockCount, expiringNowCount, expiringIngredients, settings, t }) {
+function Dashboard({ ingredients, recipes, orders, lowStockCount, expiringNowCount, expiringIngredients, settings, t, toast, setToast, setActivePage, user, households, currentHouseholdId, setCurrentHouseholdId, setIngredients, setRecipes, setOrders, setSettings, setOrderDraft }) {
+  const tipStyle = { marginBottom: 12, padding: 12, borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', color: 'inherit' };
+
+  const handleCreateHousehold = () => {
+    setShowHouseholdModal(true);
+  };
+
+  const handleSelectHousehold = async (id) => {
+    if (!id) return;
+    try {
+      const res = await loadHouseholdState(id);
+      if (res && !res.error && res.data && res.data.state) {
+        const s = res.data.state;
+        if (s.ingredients) setIngredients(s.ingredients);
+        if (s.recipes) setRecipes(s.recipes);
+        if (s.orders) setOrders(s.orders);
+        if (s.settings) setSettings(s.settings);
+        if (s.orderDraft) setOrderDraft(s.orderDraft);
+        setCurrentHouseholdId(id);
+        setToast && setToast({ message: 'Household loaded', timeout: 2500 });
+      }
+    } catch (e) { console.error(e); setToast && setToast({ message: 'Load error', timeout: 3000 }); }
+  };
+
   return (
     <div>
+      {settings?.showTips ? (
+        <div style={tipStyle}>
+          {user ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ fontSize: 13 }}>Household:</label>
+              <select value={currentHouseholdId || ''} onChange={(e) => handleSelectHousehold(e.target.value)} style={{ padding: 6 }}>
+                <option value="">(select)</option>
+                {households.map(h => <option key={h.id} value={h.id}>{h.name || h.id}</option>)}
+              </select>
+              <button onClick={handleCreateHousehold} style={{ padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2f7a4a', color: '#fff' }}>Create household</button>
+            </div>
+          ) : null}
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Tips</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {expiringIngredients.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span>{expiringIngredients.length} item(s) expiring soon</span>
+                <button onClick={() => setActivePage && setActivePage('pantry')} style={{ padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2f7a4a', color: '#fff' }}>View pantry</button>
+              </div>
+            )}
+            {lowStockCount > 0 && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span>{lowStockCount} low-stock item(s)</span>
+                <button onClick={() => setActivePage && setActivePage('pantry')} style={{ padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#e07a3b', color: '#fff' }}>Manage pantry</button>
+              </div>
+            )}
+            <div style={{ marginLeft: 'auto' }}>
+              <button onClick={() => setActivePage && setActivePage('orders')} style={{ padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2f7a4a', color: '#fff' }}>Create order</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <div style={{ position: 'fixed', right: 16, top: 16, background: '#333', color: '#fff', padding: '10px 14px', borderRadius: 6, zIndex: 9999 }} onClick={() => setToast && setToast(null)}>
+          {toast.message}
+        </div>
+      ) : null}
+
       <div style={styles.headerRow}>
         <div>
-          <h1 style={{ marginBottom: 8, fontFamily: 'Georgia, serif', fontSize: 44, color: '#2b2b2b' }}>{t('kitchenDashboard')}</h1>
+          <h1 style={{ marginBottom: 8, fontFamily: 'Georgia, serif', fontSize: 44, color: 'inherit' }}>{t('kitchenDashboard')}</h1>
           <p style={styles.subtitle}>{t('pantrySummary')}</p>
         </div>
         <div style={styles.statusBadge}>{orders.length} active orders</div>
@@ -1331,12 +1542,12 @@ function RecipeDetail({ recipe, onBack, settings, t, setOrderDraft, setActivePag
   );
 }
 
-function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = null, setOrderDraft }) {
+function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = null, setOrderDraft, setToast }) {
   const [filter, setFilter] = useState("active");
   const [customer, setCustomer] = useState("");
   const [recipeName, setRecipeName] = useState("");
   const [due, setDue] = useState("");
-  const [servings, setServings] = useState(1);
+  const [servings, setServings] = useState(settings?.defaultServings || 1);
   const [instructions, setInstructions] = useState("");
 
   useEffect(() => {
@@ -1345,7 +1556,13 @@ function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = nul
       setServings(orderDraft.servings || 1);
       setInstructions(orderDraft.instructions || "");
     }
+    // update servings when default changes
   }, [orderDraft]);
+
+  useEffect(() => {
+    setServings(settings?.defaultServings || 1);
+  }, [settings?.defaultServings]);
+ 
 
   const filterLabels = t('orderFilters');
   const filterOptions = [
@@ -1374,6 +1591,10 @@ function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = nul
     setOrders((cur) => [next, ...cur]);
     setCustomer(""); setRecipeName(""); setDue(""); setServings(1); setInstructions("");
     if (setOrderDraft) setOrderDraft(null);
+    if (settings?.notifications && setToast) {
+      setToast({ message: `Order for ${next.recipe} created`, timeout: 4000 });
+      setTimeout(()=> setToast(null), 4000);
+    }
   };
 
   const advanceOrder = (id) => {
@@ -1450,7 +1671,7 @@ function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = nul
                 <div>
                   <strong>{order.customer}</strong>
                   <div style={styles.itemMeta}>{order.recipe} {order.servings ? `• ${order.servings} serving${order.servings>1?'s':''}` : ''}</div>
-                  {order.instructions ? <div style={{ color: '#666', marginTop: 6 }}>{order.instructions}</div> : null}
+                  {order.instructions ? <div style={{ color: 'inherit', marginTop: 6 }}>{order.instructions}</div> : null}
                 </div>
                 <div style={styles.orderInfo}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1474,8 +1695,8 @@ function Orders({ orders, setOrders, settings, t, recipes = [], orderDraft = nul
 function Card({ title, value }) {
   return (
     <div style={styles.card}>
-      <h4 style={{ color: '#6b6b6b', margin: 0, fontSize: 13 }}>{title}</h4>
-      <h2 style={{ marginTop: 10, marginBottom: 0, fontSize: 36, fontFamily: 'Georgia, serif', color: '#1f6f3a' }}>{value}</h2>
+        <h4 style={{ color: 'inherit', margin: 0, fontSize: 13 }}>{title}</h4>
+          <h2 style={{ marginTop: 10, marginBottom: 0, fontSize: 36, fontFamily: 'Georgia, serif', color: 'inherit' }}>{value}</h2>
     </div>
   );
 }
@@ -1487,7 +1708,7 @@ function Panel({ title, text }) {
         <h3 style={{ margin: 0 }}>{title}</h3>
         <a style={{ fontSize: 13, color: '#9aa0a6', textDecoration: 'none' }}>View all</a>
       </div>
-      <p style={{ color: "#666", marginTop: 6 }}>{text}</p>
+      <p style={{ color: "inherit", marginTop: 6 }}>{text}</p>
     </div>
   );
 }
@@ -1639,7 +1860,7 @@ const styles = {
     background: "transparent",
     textAlign: "left",
     cursor: "pointer",
-    color: "#2b2b2b",
+    color: "inherit",
     borderRadius: 8,
     fontWeight: 600
   },
@@ -1676,21 +1897,21 @@ const styles = {
   },
 
   subtitle: {
-    color: "#7a7a7a",
+    color: "inherit",
     marginTop: 0,
     marginBottom: 20,
     fontSize: 14
   },
 
   importStatus: {
-    color: "#555",
+    color: "inherit",
     marginTop: 10,
     lineHeight: 1.5,
     fontSize: 14
   },
 
   recipeDescription: {
-    color: "#444",
+    color: "inherit",
     marginTop: 12,
     marginBottom: 18,
     maxWidth: 700
@@ -1698,8 +1919,8 @@ const styles = {
 
   statusBadge: {
     borderRadius: 999,
-    background: "#e6f4ea",
-    color: "#1f6f3a",
+    background: "var(--status-bg, #e6f4ea)",
+    color: "var(--status-color, #1f6f3a)",
     padding: "10px 16px",
     fontWeight: 600
   },
@@ -1840,7 +2061,7 @@ const styles = {
 
   instructionsList: {
     paddingLeft: 18,
-    color: "#444"
+    color: "inherit"
   },
 
   instructionItem: {
@@ -1849,8 +2070,8 @@ const styles = {
   },
 
   listCard: {
-    background: "white",
-    border: "1px solid #eee",
+    background: "inherit",
+    border: "1px solid var(--card-border, #eee)",
     borderRadius: 16,
     padding: 20
   },
@@ -1864,7 +2085,7 @@ const styles = {
   },
 
   emptyText: {
-    color: "#7a7a85",
+    color: "inherit",
     padding: "24px 0"
   },
 
@@ -1879,12 +2100,12 @@ const styles = {
     alignItems: "center",
     padding: 16,
     borderRadius: 12,
-    background: "#fafafa",
-    border: "1px solid #f0f0f3"
+    background: "inherit",
+    border: "1px solid var(--item-border, #f0f0f3)"
   },
 
   itemMeta: {
-    color: "#777",
+    color: "inherit",
     fontSize: 14,
     marginTop: 4
   },
@@ -1895,9 +2116,9 @@ const styles = {
   },
 
   recipeCardClickable: {
-    background: "#fafafa",
+    background: "inherit",
     borderRadius: 14,
-    border: "1px solid #ececec",
+    border: "1px solid var(--card-border, #ececec)",
     padding: 18,
     cursor: "pointer",
     textAlign: "left",
@@ -1915,13 +2136,13 @@ const styles = {
 
   recipeSource: {
     fontSize: 13,
-    color: "#666"
+    color: "inherit"
   },
 
   recipeList: {
     paddingLeft: 18,
     margin: 0,
-    color: "#444"
+    color: "inherit"
   },
 
   orderGrid: {

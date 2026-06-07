@@ -10,12 +10,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "start-proxy": "node server/proxy.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
+    ,"@supabase/supabase-js": "^2.30.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
