@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState, useRef } from "react";
+import pkg from "../package.json";
 
 const initialIngredients = [
   { id: 1, name: "Tomatoes", quantity: 6, unit: "pcs", note: "Fresh", expiryDate: "2026-06-10" },
@@ -878,9 +879,40 @@ export default function App() {
 
   const t = (k, ...args) => getTranslation(settings.language, k, ...args);
 
+  // Build contrast-aware overrides
+  const contrast = settings?.contrast || 'normal';
+  const appStyle = contrast === 'high'
+    ? {
+        ...styles.app,
+        background: '#ffffff',
+        color: '#000'
+      }
+    : styles.app;
+
+  // Generate a few derived style overrides for high contrast
+  const highContrastOverrides = contrast === 'high' ? {
+    sidebar: { ...styles.sidebar, background: '#000', color: '#fff', borderRight: '2px solid #fff' },
+    main: { ...styles.main, background: '#fff', color: '#000' },
+    primaryButton: { ...styles.primaryButton, background: '#000', color: '#fff' },
+    input: { ...styles.input, background: '#fff', color: '#000', border: '2px solid #000' },
+    listCard: { ...styles.listCard, background: '#fff', border: '2px solid #000' }
+  } : {};
+
+  const appliedStyles = {
+    app: appStyle,
+    sidebar: highContrastOverrides.sidebar || styles.sidebar,
+    main: highContrastOverrides.main || styles.main,
+    primaryButton: highContrastOverrides.primaryButton || styles.primaryButton,
+    input: highContrastOverrides.input || styles.input,
+    listCard: highContrastOverrides.listCard || styles.listCard,
+  };
+
+  // Helper to read app version
+  const appVersion = pkg?.version || '0.0.0';
+
   return (
-    <div style={settings.contrast === 'high' ? { ...styles.app, background: '#ffffff', color: '#000' } : styles.app}>
-      <div style={styles.sidebar}>
+    <div style={appliedStyles.app}>
+      <div style={appliedStyles.sidebar}>
         <div style={styles.logo}>🌿 {t('appName')}</div>
 
         {[
@@ -904,7 +936,7 @@ export default function App() {
         ))}
       </div>
 
-      <div style={styles.main}>
+      <div style={appliedStyles.main}>
         {activePage === "dashboard" && (
           <Dashboard
             ingredients={ingredients}
@@ -1471,7 +1503,7 @@ function Settings({ settings, setSettings, t }) {
   return (
     <div>
       <h1 style={{ marginBottom: 8 }}>{t('settings')}</h1>
-      <div style={styles.listCard}>
+      <div style={{ ...styles.listCard, position: 'relative' }}>
         <div style={styles.sectionHeader}>
           <h2>{t('preferencesTitle')}</h2>
         </div>
@@ -1486,6 +1518,45 @@ function Settings({ settings, setSettings, t }) {
             <option value="metric">Metric</option>
             <option value="imperial">Imperial</option>
           </select>
+        </label>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          Notifications:
+          <input
+            type="checkbox"
+            checked={!!settings.notifications}
+            onChange={(e) => update({ notifications: !!e.target.checked })}
+            style={{ marginLeft: 8 }}
+          />
+        </label>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          Theme:
+          <select value={settings.theme || 'auto'} onChange={(e)=> update({ theme: e.target.value })} style={{ marginLeft: 8 }}>
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          Default servings:
+          <input type="number" min="1" max="20" value={settings.defaultServings || 1} onChange={(e)=> update({ defaultServings: Number(e.target.value) })} style={{ marginLeft: 8, width: 80 }} />
+        </label>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          Auto-save interval:
+          <select value={settings.autosaveInterval || 'off'} onChange={(e)=> update({ autosaveInterval: e.target.value })} style={{ marginLeft: 8 }}>
+            <option value="off">Off</option>
+            <option value="15">15s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+          </select>
+        </label>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <input type="checkbox" checked={!!settings.showTips} onChange={(e)=> update({ showTips: !!e.target.checked })} />
+          <span style={{ marginLeft: 8 }}>Show tips</span>
         </label>
 
         <label style={{ display: 'block', marginBottom: 12 }}>
@@ -1517,6 +1588,10 @@ function Settings({ settings, setSettings, t }) {
 
         <div style={{ marginTop: 18 }}>
           <button style={styles.primaryButton} onClick={clearData}>{t('clearSavedData')}</button>
+        </div>
+
+        <div style={{ position: 'absolute', right: 12, bottom: 10, color: '#999', fontSize: 12 }}>
+          v{appVersion}
         </div>
       </div>
     </div>
