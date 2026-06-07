@@ -1,6 +1,8 @@
 ﻿import { useEffect, useMemo, useState, useRef } from "react";
 import pkg from "../package.json";
 
+const APP_VERSION = pkg?.version || '0.0.0';
+
 const initialIngredients = [
   { id: 1, name: "Tomatoes", quantity: 6, unit: "pcs", note: "Fresh", expiryDate: "2026-06-10" },
   { id: 2, name: "Olive Oil", quantity: 1, unit: "bottle", note: "Extra virgin", expiryDate: "2026-12-01" },
@@ -1591,7 +1593,7 @@ function Settings({ settings, setSettings, t }) {
         </div>
 
         <div style={{ position: 'absolute', right: 12, bottom: 10, color: '#999', fontSize: 12 }}>
-          v{appVersion}
+          v{APP_VERSION}
         </div>
       </div>
     </div>
